@@ -1,0 +1,665 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="UTF-8" />
+        <title>Maze Game</title>
+        <!-- Корректное масштабирование на мобильных устройствах -->
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <style>
+            /* Общие стили и отключение выделения текста */
+            body {
+                font-family: Arial, sans-serif;
+                text-align: center;
+                user-select: none;
+                -webkit-user-select: none;
+                -ms-user-select: none;
+                margin: 0;
+                padding: 0;
+            }
+            /* Игровой контейнер (на ПК 600x400, на телефоне – уменьшается) */
+            #game-container {
+                position: relative;
+                width: 600px;
+                height: 400px;
+                background: #f0f0f0;
+                border: 2px solid #333;
+                margin: 100px auto 0;
+                overflow: hidden;
+            }
+            /* Для маленьких экранов уменьшаем размер игрового поля */
+            @media (max-width: 600px) {
+                #game-container {
+                    width: 300px;
+                    height: 200px;
+                    margin: 50px auto 0;
+                }
+            }
+            /* Игрок – шарик */
+            #player {
+                position: absolute;
+                width: 20px;
+                height: 20px;
+                background: #00f;
+                border-radius: 50%;
+                transition: all 0.1s ease;
+                cursor: pointer;
+            }
+            /* Стены лабиринта */
+            .wall {
+                position: absolute;
+                background: #666;
+            }
+            /* Финиш (звёздочка) – отключены события мыши/сенсора */
+            #goal {
+                position: absolute;
+                width: 30px;
+                height: 30px;
+                background: #f00;
+                border-radius: 50%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 24px;
+                color: white;
+                pointer-events: none;
+            }
+            /* Информационный блок */
+            #info {
+                margin-top: 10px;
+                font-size: 18px;
+            }
+            /* Оверлей окончания игры */
+            #game-over {
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0, 0, 0, 0.8);
+                color: #fff;
+                display: none;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                z-index: 10;
+            }
+            #game-over h2,
+            #game-over p {
+                margin: 10px;
+            }
+            #game-over button {
+                margin-top: 20px;
+                padding: 10px 20px;
+                font-size: 16px;
+                cursor: pointer;
+            }
+            /* Стили для виртуального джойстика */
+            #joystick-base {
+                position: absolute;
+                width: 50px;
+                height: 50px;
+                background: rgba(0, 0, 0, 0.3);
+                border-radius: 50%;
+                pointer-events: none;
+            }
+            #joystick-stick {
+                position: absolute;
+                width: 30px;
+                height: 30px;
+                background: rgba(0, 0, 0, 0.5);
+                border-radius: 50%;
+                pointer-events: none;
+            }
+        </style>
+    </head>
+    <body>
+        <!-- Информационный блок -->
+        <div id="info">
+            Уровень: <span id="level">1</span> | Время:
+            <span id="timer">60</span> сек
+        </div>
+        <!-- Контейнер игры -->
+        <div id="game-container">
+            <div id="player"></div>
+            <div id="goal">★</div>
+            <!-- Оверлей окончания игры -->
+            <div id="game-over">
+                <h2>Игра окончена!</h2>
+                <p id="time-score"></p>
+                <p id="distance-score"></p>
+                <h3 id="total-score"></h3>
+                <button onclick="restartGame()">Начать заново</button>
+            </div>
+        </div>
+        <script>
+            // Размер базовой ячейки
+            const CELL_SIZE = 40;
+
+            // Элементы DOM
+            const gameContainer = document.getElementById('game-container');
+            const player = {
+                element: document.getElementById('player'),
+                // Начальное положение – немного смещённое от левого верхнего угла
+                x: CELL_SIZE / 2 - 10 + CELL_SIZE * 0.1,
+                y: CELL_SIZE / 2 - 10 + CELL_SIZE * 0.1,
+                maxSpeed: 8,
+                acceleration: 0.5,
+                friction: 0.92,
+                velocityX: 0,
+                velocityY: 0,
+            };
+            const goal = {
+                element: document.getElementById('goal'),
+                x: 0, // будут заданы в generateMaze()
+                y: 0,
+            };
+            const levelElement = document.getElementById('level');
+            const timerElement = document.getElementById('timer');
+            const gameOverDiv = document.getElementById('game-over');
+            const timeScoreEl = document.getElementById('time-score');
+            const distanceScoreEl = document.getElementById('distance-score');
+            const totalScoreEl = document.getElementById('total-score');
+
+            let currentLevel = 1;
+            let timeLeft = 60;
+            let timerInterval;
+            let walls = [];
+            let grid = [];
+
+            // Переменные для начисления очков
+            let totalTimeScore = 0;
+            let totalDistanceScore = 0;
+            let levelDistanceScore = 0;
+            let levelStartTime = Date.now();
+            let lastPos = { x: player.x, y: player.y };
+
+            // Управление клавиатурой
+            const keys = { left: false, right: false, up: false, down: false };
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'ArrowLeft') keys.left = true;
+                else if (e.key === 'ArrowRight') keys.right = true;
+                else if (e.key === 'ArrowUp') keys.up = true;
+                else if (e.key === 'ArrowDown') keys.down = true;
+            });
+            document.addEventListener('keyup', (e) => {
+                if (e.key === 'ArrowLeft') keys.left = false;
+                else if (e.key === 'ArrowRight') keys.right = false;
+                else if (e.key === 'ArrowUp') keys.up = false;
+                else if (e.key === 'ArrowDown') keys.down = false;
+            });
+
+            // Управление мышью (ПК)
+            let isMouseDown = false;
+            let targetX = player.x,
+                targetY = player.y;
+            gameContainer.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                isMouseDown = true;
+                updateTargetPosition(e);
+            });
+            document.addEventListener('mouseup', () => {
+                isMouseDown = false;
+            });
+            gameContainer.addEventListener('mousemove', (e) => {
+                if (isMouseDown) {
+                    updateTargetPosition(e);
+                }
+            });
+            function updateTargetPosition(e) {
+                const rect = gameContainer.getBoundingClientRect();
+                targetX = e.clientX - rect.left - 10;
+                targetY = e.clientY - rect.top - 10;
+            }
+
+            // Управление сенсором (виртуальный джойстик)
+            let joystickActive = false;
+            let joystickBaseX = 0,
+                joystickBaseY = 0;
+            let joystickCurrentX = 0,
+                joystickCurrentY = 0;
+            const maxJoystickDistance = 40;
+            let joystickBaseElement = null,
+                joystickStickElement = null;
+
+            gameContainer.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                joystickActive = true;
+                const rect = gameContainer.getBoundingClientRect();
+                const touch = e.touches[0];
+                joystickBaseX = touch.clientX - rect.left;
+                joystickBaseY = touch.clientY - rect.top;
+                joystickCurrentX = joystickBaseX;
+                joystickCurrentY = joystickBaseY;
+                // Создаём элементы джойстика
+                joystickBaseElement = document.createElement('div');
+                joystickBaseElement.id = 'joystick-base';
+                joystickBaseElement.style.left = joystickBaseX - 25 + 'px';
+                joystickBaseElement.style.top = joystickBaseY - 25 + 'px';
+                gameContainer.appendChild(joystickBaseElement);
+
+                joystickStickElement = document.createElement('div');
+                joystickStickElement.id = 'joystick-stick';
+                joystickStickElement.style.left = joystickBaseX - 15 + 'px';
+                joystickStickElement.style.top = joystickBaseY - 15 + 'px';
+                gameContainer.appendChild(joystickStickElement);
+            });
+
+            gameContainer.addEventListener('touchmove', (e) => {
+                e.preventDefault();
+                if (joystickActive) {
+                    const rect = gameContainer.getBoundingClientRect();
+                    const touch = e.touches[0];
+                    joystickCurrentX = touch.clientX - rect.left;
+                    joystickCurrentY = touch.clientY - rect.top;
+                    let dx = joystickCurrentX - joystickBaseX;
+                    let dy = joystickCurrentY - joystickBaseY;
+                    let distance = Math.hypot(dx, dy);
+                    if (distance > maxJoystickDistance) {
+                        const angle = Math.atan2(dy, dx);
+                        dx = Math.cos(angle) * maxJoystickDistance;
+                        dy = Math.sin(angle) * maxJoystickDistance;
+                        joystickCurrentX = joystickBaseX + dx;
+                        joystickCurrentY = joystickBaseY + dy;
+                    }
+                    if (joystickStickElement) {
+                        joystickStickElement.style.left =
+                            joystickBaseX + dx - 15 + 'px';
+                        joystickStickElement.style.top =
+                            joystickBaseY + dy - 15 + 'px';
+                    }
+                }
+            });
+
+            document.addEventListener('touchend', (e) => {
+                joystickActive = false;
+                if (joystickBaseElement) {
+                    gameContainer.removeChild(joystickBaseElement);
+                    joystickBaseElement = null;
+                }
+                if (joystickStickElement) {
+                    gameContainer.removeChild(joystickStickElement);
+                    joystickStickElement = null;
+                }
+            });
+
+            // Лабиринт: вычисляем размеры игрового поля динамически
+            function generateMaze() {
+                // Определяем текущую ширину и высоту игрового контейнера
+                const GAME_WIDTH = gameContainer.offsetWidth;
+                const GAME_HEIGHT = gameContainer.offsetHeight;
+                const COLS = Math.floor(GAME_WIDTH / CELL_SIZE);
+                const ROWS = Math.floor(GAME_HEIGHT / CELL_SIZE);
+
+                // Задаём координаты финиша
+                goal.x = GAME_WIDTH - CELL_SIZE;
+                goal.y = GAME_HEIGHT - CELL_SIZE;
+
+                gameContainer.innerHTML = '';
+                // Добавляем элементы игрока, финиша и оверлея
+                gameContainer.appendChild(player.element);
+                gameContainer.appendChild(goal.element);
+                gameContainer.appendChild(gameOverDiv);
+
+                initGrid(ROWS, COLS);
+                carvePath(0, 0, COLS, ROWS);
+                generateWalls(GAME_WIDTH, GAME_HEIGHT, COLS, ROWS);
+
+                // Отрисовываем стены
+                walls.forEach((wall) => {
+                    const wallElement = document.createElement('div');
+                    wallElement.className = 'wall';
+                    wallElement.style.left = `${wall[0]}px`;
+                    wallElement.style.top = `${wall[1]}px`;
+                    wallElement.style.width = `${wall[2]}px`;
+                    wallElement.style.height = `${wall[3]}px`;
+                    gameContainer.appendChild(wallElement);
+                });
+
+                // Позиционирование финиша и игрока
+                goal.element.style.left = `${goal.x}px`;
+                goal.element.style.top = `${goal.y}px`;
+                player.element.style.left = `${player.x}px`;
+                player.element.style.top = `${player.y}px`;
+            }
+
+            // Инициализация сетки (ROWS x COLS)
+            function initGrid(ROWS, COLS) {
+                grid = Array(ROWS)
+                    .fill()
+                    .map(() =>
+                        Array(COLS)
+                            .fill()
+                            .map(() => ({
+                                top: true,
+                                right: true,
+                                bottom: true,
+                                left: true,
+                                visited: false,
+                            }))
+                    );
+            }
+
+            // Рекурсивное создание лабиринта
+            function carvePath(x, y, COLS, ROWS) {
+                const dirs = ['top', 'right', 'bottom', 'left'];
+                grid[y][x].visited = true;
+
+                // Перемешиваем направления
+                for (let i = dirs.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [dirs[i], dirs[j]] = [dirs[j], dirs[i]];
+                }
+
+                for (const dir of dirs) {
+                    let nx = x,
+                        ny = y;
+                    switch (dir) {
+                        case 'top':
+                            ny = y - 1;
+                            break;
+                        case 'right':
+                            nx = x + 1;
+                            break;
+                        case 'bottom':
+                            ny = y + 1;
+                            break;
+                        case 'left':
+                            nx = x - 1;
+                            break;
+                    }
+                    if (
+                        nx >= 0 &&
+                        nx < COLS &&
+                        ny >= 0 &&
+                        ny < ROWS &&
+                        !grid[ny][nx].visited
+                    ) {
+                        grid[y][x][dir] = false;
+                        grid[ny][nx][
+                            {
+                                top: 'bottom',
+                                right: 'left',
+                                bottom: 'top',
+                                left: 'right',
+                            }[dir]
+                        ] = false;
+                        carvePath(nx, ny, COLS, ROWS);
+                    }
+                }
+            }
+
+            // Генерация стен лабиринта
+            function generateWalls(GAME_WIDTH, GAME_HEIGHT, COLS, ROWS) {
+                walls = [];
+                // Внешние стены
+                walls.push([0, 0, GAME_WIDTH, 10]); // верхняя
+                walls.push([0, GAME_HEIGHT - 10, GAME_WIDTH, 10]); // нижняя
+                walls.push([0, 0, 10, GAME_HEIGHT]); // левая
+                walls.push([GAME_WIDTH - 10, 0, 10, GAME_HEIGHT]); // правая
+
+                // Внутренние стены
+                for (let y = 0; y < ROWS; y++) {
+                    for (let x = 0; x < COLS; x++) {
+                        const cell = grid[y][x];
+                        if (cell.top)
+                            walls.push([
+                                x * CELL_SIZE,
+                                y * CELL_SIZE,
+                                CELL_SIZE,
+                                10,
+                            ]);
+                        if (cell.left)
+                            walls.push([
+                                x * CELL_SIZE,
+                                y * CELL_SIZE,
+                                10,
+                                CELL_SIZE,
+                            ]);
+                        if (x === COLS - 1 && cell.right)
+                            walls.push([
+                                (x + 1) * CELL_SIZE - 10,
+                                y * CELL_SIZE,
+                                10,
+                                CELL_SIZE,
+                            ]);
+                        if (y === ROWS - 1 && cell.bottom)
+                            walls.push([
+                                x * CELL_SIZE,
+                                (y + 1) * CELL_SIZE - 10,
+                                CELL_SIZE,
+                                10,
+                            ]);
+                    }
+                }
+
+                // Убираем стены вблизи старта и финиша (безопасная зона)
+                const safeZone = CELL_SIZE * 0.1;
+                walls = walls.filter((wall) => {
+                    const isNearStart =
+                        wall[0] < player.x + safeZone &&
+                        wall[0] + wall[2] > player.x - safeZone &&
+                        wall[1] < player.y + safeZone &&
+                        wall[1] + wall[3] > player.y - safeZone;
+                    const isNearGoal =
+                        wall[0] < goal.x + safeZone &&
+                        wall[0] + wall[2] > goal.x - safeZone &&
+                        wall[1] < goal.y + safeZone &&
+                        wall[1] + wall[3] > goal.y - safeZone;
+                    return !isNearStart && !isNearGoal;
+                });
+            }
+
+            // Функция движения – теперь с учётом виртуального джойстика, клавиатуры и мыши.
+            function moveTowardsTarget() {
+                // Получаем текущие размеры игрового поля
+                const GAME_WIDTH = gameContainer.offsetWidth;
+                const GAME_HEIGHT = gameContainer.offsetHeight;
+
+                if (joystickActive) {
+                    // Управление джойстиком: направление определяется смещением от базы
+                    const dx = joystickCurrentX - joystickBaseX;
+                    const dy = joystickCurrentY - joystickBaseY;
+                    // Прямо устанавливаем скорость пропорционально смещению (максимум при maxJoystickDistance)
+                    player.velocityX =
+                        (dx / maxJoystickDistance) * player.maxSpeed;
+                    player.velocityY =
+                        (dy / maxJoystickDistance) * player.maxSpeed;
+                } else if (keys.left || keys.right || keys.up || keys.down) {
+                    let dx = 0,
+                        dy = 0;
+                    if (keys.left) dx -= 1;
+                    if (keys.right) dx += 1;
+                    if (keys.up) dy -= 1;
+                    if (keys.down) dy += 1;
+                    if (dx !== 0 || dy !== 0) {
+                        const angle = Math.atan2(dy, dx);
+                        player.velocityX +=
+                            Math.cos(angle) * player.acceleration;
+                        player.velocityY +=
+                            Math.sin(angle) * player.acceleration;
+                    }
+                } else if (isMouseDown) {
+                    const dx = targetX - player.x;
+                    const dy = targetY - player.y;
+                    const distance = Math.hypot(dx, dy);
+                    if (distance > 2) {
+                        const angle = Math.atan2(dy, dx);
+                        player.velocityX +=
+                            Math.cos(angle) * player.acceleration;
+                        player.velocityY +=
+                            Math.sin(angle) * player.acceleration;
+                    }
+                }
+
+                // Ограничиваем максимальную скорость
+                const speed = Math.hypot(player.velocityX, player.velocityY);
+                if (speed > player.maxSpeed) {
+                    player.velocityX =
+                        (player.velocityX / speed) * player.maxSpeed;
+                    player.velocityY =
+                        (player.velocityY / speed) * player.maxSpeed;
+                }
+
+                // Применяем трение
+                player.velocityX *= player.friction;
+                player.velocityY *= player.friction;
+
+                // Вычисляем новые координаты
+                const newX = player.x + player.velocityX;
+                const newY = player.y + player.velocityY;
+
+                if (!checkCollision(newX, newY)) {
+                    player.x = newX;
+                    player.y = newY;
+                } else {
+                    if (
+                        !checkCollision(player.x + player.velocityX, player.y)
+                    ) {
+                        player.x += player.velocityX;
+                    }
+                    if (
+                        !checkCollision(player.x, player.y + player.velocityY)
+                    ) {
+                        player.y += player.velocityY;
+                    }
+                }
+
+                // Ограничиваем игрока в пределах игрового поля
+                player.x = Math.max(0, Math.min(player.x, GAME_WIDTH - 20));
+                player.y = Math.max(0, Math.min(player.y, GAME_HEIGHT - 20));
+
+                // Обновляем позицию шарика
+                player.element.style.left = `${player.x}px`;
+                player.element.style.top = `${player.y}px`;
+
+                // Начисляем очки за пройденное расстояние (по верному пути)
+                const dxScore = player.x - lastPos.x;
+                const dyScore = player.y - lastPos.y;
+                const delta = Math.hypot(dxScore, dyScore);
+                if (delta > 0) {
+                    levelDistanceScore += delta;
+                    lastPos = { x: player.x, y: player.y };
+                }
+
+                // Если достигнут финиш, вычисляем очки за уровень
+                if (checkWin()) {
+                    const levelEndTime = Date.now();
+                    const levelDuration =
+                        (levelEndTime - levelStartTime) / 1000; // в секундах
+                    // Подсчёт очков: каждые 10 секунд дают половину очков предыдущего интервала:
+                    // 10 сек = 1000, 20 сек = 500, 30 сек = 250, 40 сек = 125, и т.д.
+                    const timeScore = Math.round(
+                        1000 *
+                            Math.pow(
+                                0.5,
+                                Math.max(0, (levelDuration - 10) / 10)
+                            )
+                    );
+                    totalTimeScore += timeScore;
+                    totalDistanceScore += Math.round(levelDistanceScore);
+
+                    // За прохождение уровня добавляем 10 секунд к таймеру
+                    timeLeft += 10;
+                    currentLevel++;
+                    levelElement.textContent = currentLevel;
+
+                    // Сброс позиции игрока
+                    player.x = CELL_SIZE / 2 - 10 + CELL_SIZE * 0.1;
+                    player.y = CELL_SIZE / 2 - 10 + CELL_SIZE * 0.1;
+                    player.element.style.left = `${player.x}px`;
+                    player.element.style.top = `${player.y}px`;
+
+                    // Генерация нового лабиринта
+                    generateMaze();
+
+                    // Сброс времени и расстояния для уровня
+                    levelStartTime = Date.now();
+                    levelDistanceScore = 0;
+                    lastPos = { x: player.x, y: player.y };
+                }
+            }
+
+            // Проверка столкновений (используем внутренний коллайдер 16x16 внутри визуального шарика 20x20)
+            function checkCollision(x, y) {
+                return walls.some(
+                    (wall) =>
+                        x + 2 + 16 > wall[0] &&
+                        x + 2 < wall[0] + wall[2] &&
+                        y + 2 + 16 > wall[1] &&
+                        y + 2 < wall[1] + wall[3]
+                );
+            }
+
+            // Проверка достижения финиша
+            function checkWin() {
+                return (
+                    player.x + 20 > goal.x &&
+                    player.x < goal.x + 30 &&
+                    player.y + 20 > goal.y &&
+                    player.y < goal.y + 30
+                );
+            }
+
+            // Таймер игры
+            function startTimer() {
+                timerInterval = setInterval(() => {
+                    timeLeft--;
+                    timerElement.textContent = timeLeft;
+                    if (timeLeft <= 0) {
+                        clearInterval(timerInterval);
+                        gameOver();
+                    }
+                }, 1000);
+            }
+
+            // Окончание игры – останавливаем игровой цикл и показываем оверлей с результатами
+            let animationFrameId;
+            function gameOver() {
+                cancelAnimationFrame(animationFrameId);
+                const totalScore = totalTimeScore + totalDistanceScore;
+                timeScoreEl.textContent = `Очки за время: ${totalTimeScore}`;
+                distanceScoreEl.textContent = `Очки за расстояние: ${totalDistanceScore}`;
+                totalScoreEl.textContent = `Общий счет: ${totalScore}`;
+                gameOverDiv.style.display = 'flex';
+            }
+
+            // Перезапуск игры
+            function restartGame() {
+                currentLevel = 1;
+                timeLeft = 60;
+                timerElement.textContent = '60';
+                totalTimeScore = 0;
+                totalDistanceScore = 0;
+                levelDistanceScore = 0;
+                levelStartTime = Date.now();
+                lastPos = {
+                    x: CELL_SIZE / 2 - 10 + CELL_SIZE * 0.1,
+                    y: CELL_SIZE / 2 - 10 + CELL_SIZE * 0.1,
+                };
+                levelElement.textContent = currentLevel;
+
+                player.x = CELL_SIZE / 2 - 10 + CELL_SIZE * 0.1;
+                player.y = CELL_SIZE / 2 - 10 + CELL_SIZE * 0.1;
+                player.velocityX = 0;
+                player.velocityY = 0;
+                player.element.style.left = `${player.x}px`;
+                player.element.style.top = `${player.y}px`;
+
+                gameOverDiv.style.display = 'none';
+                generateMaze();
+                startTimer();
+                gameLoop();
+            }
+
+            function gameLoop() {
+                moveTowardsTarget();
+                animationFrameId = requestAnimationFrame(gameLoop);
+            }
+
+            // Запуск игры
+            generateMaze();
+            startTimer();
+            gameLoop();
+        </script>
+    </body>
+</html>
