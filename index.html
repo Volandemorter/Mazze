@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="ru">
+    <head>
+        <meta charset="UTF-8" />
+        <meta
+            name="viewport"
+            content="width=device-width, initial-scale=1.0, user-scalable=no"
+        />
+        <title>Maze Runner - 2D Лабиринт</title>
+        <link rel="stylesheet" href="style.css" />
+    </head>
+    <body>
+        <div class="game-container">
+            <div class="info-panel">
+                <div class="info-item">⏱️ <span id="timer">00</span> сек</div>
+                <div class="info-item">⭐ <span id="score">0</span></div>
+                <div class="info-item">
+                    📊 Уровень <span id="level">1</span>
+                </div>
+                <div class="info-item">👤 <span id="charName">-</span></div>
+                <button id="logoutBtn">Выйти</button>
+            </div>
+            <canvas id="gameCanvas" width="600" height="600"></canvas>
+
+            <!-- Управление -->
+            <div class="control-bar">
+                <div class="control-modes">
+                    <label
+                        ><input
+                            type="radio"
+                            name="control"
+                            value="keys"
+                            checked
+                        />
+                        ⌨️ Клавиши</label
+                    >
+                    <label
+                        ><input type="radio" name="control" value="mouse" /> 🖱️
+                        Мышь</label
+                    >
+                    <label
+                        ><input type="radio" name="control" value="joystick" />
+                        🕹️ Джойстик</label
+                    >
+                </div>
+                <div id="joystickContainer" style="display: none">
+                    <div id="joystickBase"></div>
+                </div>
+                <div class="action-buttons">
+                    <button id="restartGame">🔄 Новая игра</button>
+                    <button id="showLeaderboardBtn">🏆 Таблица лидеров</button>
+                </div>
+            </div>
+            <div
+                id="leaderboardPanel"
+                class="leaderboard"
+                style="display: none"
+            >
+                <h4>Лучшие игроки</h4>
+                <div id="leaderboardList"></div>
+            </div>
+        </div>
+
+        <!-- Модалки -->
+        <div id="authModal" class="modal">
+            <div class="modal-content">
+                <h2>Maze Runner</h2>
+                <input type="email" id="loginEmail" placeholder="Email" />
+                <input
+                    type="password"
+                    id="loginPassword"
+                    placeholder="Пароль"
+                />
+                <button id="loginBtn">Войти</button>
+                <button id="registerBtn">Зарегистрироваться</button>
+                <hr />
+                <button id="guestBtn">Играть без входа</button>
+            </div>
+        </div>
+
+        <div id="characterModal" class="modal">
+            <div class="modal-content">
+                <h3>Выбери персонажа</h3>
+                <div class="character-select" id="characterSelect"></div>
+                <button id="confirmCharacter">Играть</button>
+            </div>
+        </div>
+
+        <div id="gameOverModal" class="modal">
+            <div class="modal-content">
+                <h3>Игра окончена!</h3>
+                <p>Ваши очки: <span id="finalScore">0</span></p>
+                <p>Пройдено уровней: <span id="finalLevels">0</span></p>
+                <button id="playAgainBtn">Сыграть снова</button>
+                <button id="closeGameOver">Закрыть</button>
+            </div>
+        </div>
+
+        <script type="importmap">
+            {
+                "imports": {
+                    "firebase/app": "https://www.gstatic.com/firebasejs/12.11.0/firebase-app.js",
+                    "firebase/auth": "https://www.gstatic.com/firebasejs/12.11.0/firebase-auth.js",
+                    "firebase/database": "https://www.gstatic.com/firebasejs/12.11.0/firebase-database.js"
+                }
+            }
+        </script>
+        <script type="module" src="js/main.js"></script>
+    </body>
+</html>
